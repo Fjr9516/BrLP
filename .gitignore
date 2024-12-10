@@ -29,7 +29,12 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Big files
 weights/
+
+# Customized files
+examples/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
