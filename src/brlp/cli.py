@@ -26,6 +26,10 @@ def infer():
     parser.add_argument('--steps',              type=int, required=True, help='The number of timepoints between the starting and target age')
     parser.add_argument('--threads',            type=int, default=1,     help='The number of threads')
     parser.add_argument('--cpu',                action='store_true',     help='Enable this option to use the CPU for computation instead of the GPU.')
+
+    # Add an argument for the customized name for output files
+    parser.add_argument('--customized_name', type=str, default=None, help='Specify a custom name for the output file.')
+    
     args = parser.parse_args()
 
     console = Console()
@@ -58,7 +62,6 @@ def infer():
     # load the input
     input_df = pd.read_csv(args.input).sort_values('age')
     segm_dir = os.path.join(args.output, 'segmentations')
-    os.makedirs(segm_dir, exist_ok=True)
 
     #-------------------------
     #-------------------------
@@ -69,6 +72,7 @@ def infer():
 
             if 'segm_path' not in input_df.columns:
                 scan_path = input_row.image_path
+                os.makedirs(segm_dir, exist_ok=True) # Only create a new folder when necessary
                 segm_path = os.path.join(segm_dir, f'{input_row.image_uid}_segm.nii.gz')
                 os.system(f'mri_synthseg --i {scan_path} --o {segm_path} --fast --threads {args.threads}')
             else:
@@ -111,7 +115,7 @@ def infer():
 
     with console.status("[bold green]Predicting future brain MRIs") as status:
 
-        for i, target_age in enumerate(timepoints):
+        for i, target_age in enumerate(timepoints[1:]): # Skip itself
 
             # subject-specific covariates
             s = [(target_age - const.AGE_MIN) / const.AGE_DELTA,
@@ -143,7 +147,12 @@ def infer():
             mri = nib.Nifti1Image(mri.numpy(), affine=const.MNI152_1P5MM_AFFINE)
             mri = utils.percnorm_nifti(mri, 5, 99.5)
             mri = utils.apply_mask(mri, nib.load(segm_path))
-            mri.to_filename(os.path.join(args.output, f'followup_age_{target_age:.0f}.nii.gz'))
+            output_file_name = (
+                f"followup_age_{target_age:.0f}"
+                if not args.customized_name
+                else f"{args.customized_name}"
+            )
+            mri.to_filename(os.path.join(args.output, f'{output_file_name}.nii.gz'))
             console.log(f"Brain MRI at age {int(target_age)} successfully generated.")
 
     console.print("[bold green] All the requested brain MRIs have been generated.")
