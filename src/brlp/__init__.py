@@ -9,5 +9,7 @@ from .networks import (
     init_autoencoder,
     init_patch_discriminator, 
     init_latent_diffusion, 
-    init_controlnet
+    init_controlnet,
+    init_conditioning_autoencoder
 )
+from .losses import CustomAdversarialLoss

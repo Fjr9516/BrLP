@@ -8,7 +8,8 @@ from nibabel.processing import resample_from_to
 from monai import transforms
 from monai.data.meta_tensor import MetaTensor
 from torch.utils.tensorboard.writer import SummaryWriter
-
+import os
+import torch.nn.functional as F
 
 class AverageLoss:
     """
@@ -193,3 +194,150 @@ def apply_mask(mri, segm):
     mri_arr = mri.get_fdata()
     mri_arr[ mask == 0 ] = 0
     return nib.Nifti1Image(mri_arr, mri.affine, mri.header)
+
+def save_reconstructed_volumes(output_dir, step, epoch, images, reconstructions, n_samples=5):
+    """
+    Save a specified number of original and reconstructed volumes to disk as NIfTI files.
+    
+    Args:
+        output_dir (str): Directory to save the volumes
+        step (int): Current training step
+        epoch (int): Current epoch
+        images (torch.Tensor): Original input images
+        reconstructions (torch.Tensor): Reconstructed images from the model
+        n_samples (int, optional): Number of samples to save. Defaults to 5.
+    """
+    # Create subdirectory for this evaluation
+    subdir = os.path.join(output_dir, f'evaluation_ep{epoch}_step{step}')
+    os.makedirs(subdir, exist_ok=True)
+    
+    # Ensure tensors are on CPU and in numpy format with float32 data type
+    # (nibabel doesn't support float16 from mixed precision training)
+    images = images.detach().cpu().to(torch.float32).numpy()
+    reconstructions = reconstructions.detach().cpu().to(torch.float32).numpy()
+    
+    # Limit to the specified number of samples
+    n_samples = min(n_samples, images.shape[0])
+    
+    for i in range(n_samples):
+        # Save original image
+        orig_img = images[i, 0]  # Assuming channel dimension is 1
+        orig_nifti = nib.Nifti1Image(orig_img, np.eye(4))
+        nib.save(orig_nifti, os.path.join(subdir, f'original_{i}.nii.gz'))
+        
+        # Save reconstruction
+        recon_img = reconstructions[i, 0]  # Assuming channel dimension is 1
+        recon_nifti = nib.Nifti1Image(recon_img, np.eye(4))
+        nib.save(recon_nifti, os.path.join(subdir, f'reconstruction_{i}.nii.gz'))
+    
+    print(f"Saved {n_samples} original and reconstructed volumes to {subdir}")
+
+
+def calculate_psnr(img1, img2, mask=None, max_val=None):
+    """
+    Calculate PSNR (Peak Signal-to-Noise Ratio) between two images.
+    Higher values indicate better quality.
+    
+    Args:
+        img1 (torch.Tensor): First image
+        img2 (torch.Tensor): Second image
+        mask (torch.Tensor, optional): Binary mask for region of interest. Defaults to None.
+        max_val (float, optional): Maximum value of the signal. Defaults to None (will use max value in img1).
+    
+    Returns:
+        float: PSNR value in dB
+    """
+    if max_val is None:
+        max_val = img1.max()
+    
+    if mask is not None:
+        # Apply mask
+        img1 = img1[mask]
+        img2 = img2[mask]
+    
+    mse = F.mse_loss(img1, img2)
+    if mse == 0:
+        return float('inf')
+    
+    return 20 * torch.log10(max_val / torch.sqrt(mse))
+
+
+def calculate_ssim(img1, img2, mask=None, window_size=11, sigma=1.5, full=False):
+    """
+    Calculate SSIM (Structural Similarity Index) between two images.
+    Implementation inspired by scikit-image and adapted for PyTorch.
+    
+    Args:
+        img1 (torch.Tensor): First image
+        img2 (torch.Tensor): Second image
+        mask (torch.Tensor, optional): Binary mask for region of interest
+        window_size (int, optional): Size of the gaussian window. Defaults to 11.
+        sigma (float, optional): Standard deviation of the gaussian window. Defaults to 1.5.
+        full (bool, optional): If True, return the full SSIM image. Defaults to False.
+    
+    Returns:
+        float: SSIM value
+    """
+    if mask is not None:
+        # Apply mask
+        img1 = img1[mask]
+        img2 = img2[mask]
+    
+    # Flatten to 1D if mask was applied
+    if mask is not None:
+        img1 = img1.view(-1)
+        img2 = img2.view(-1)
+    
+    C1 = (0.01 * 255) ** 2
+    C2 = (0.03 * 255) ** 2
+    
+    mu1 = torch.mean(img1)
+    mu2 = torch.mean(img2)
+    
+    sigma1_sq = torch.var(img1, unbiased=False)
+    sigma2_sq = torch.var(img2, unbiased=False)
+    sigma12 = torch.mean((img1 - mu1) * (img2 - mu2))
+    
+    ssim_num = (2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)
+    ssim_den = (mu1**2 + mu2**2 + C1) * (sigma1_sq + sigma2_sq + C2)
+    ssim = ssim_num / ssim_den
+    
+    return ssim
+
+
+def calculate_metrics(images, reconstructions, mask=None):
+    """
+    Calculate PSNR and SSIM metrics between original and reconstructed images.
+    
+    Args:
+        images (torch.Tensor): Original images
+        reconstructions (torch.Tensor): Reconstructed images
+        mask (torch.Tensor, optional): Binary mask to restrict calculation to brain region
+    
+    Returns:
+        tuple: (psnr, ssim) values
+    """
+    # Ensure tensors are on the same device
+    device = images.device
+    
+    if mask is not None:
+        mask = mask.to(device)
+    
+    batch_psnr = []
+    batch_ssim = []
+    
+    # Calculate metrics for each image in the batch
+    for i in range(images.shape[0]):
+        img = images[i].float()
+        recon = reconstructions[i].float()
+        
+        # Use mask for current image if provided
+        curr_mask = mask[i] if mask is not None else None
+        
+        psnr = calculate_psnr(img, recon, curr_mask)
+        ssim = calculate_ssim(img, recon, curr_mask)
+        
+        batch_psnr.append(psnr.item())
+        batch_ssim.append(ssim.item())
+    
+    return sum(batch_psnr) / len(batch_psnr), sum(batch_ssim) / len(batch_ssim)
