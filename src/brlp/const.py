@@ -79,7 +79,7 @@ CONDITIONING_REGIONS = [
 ]
 
 # choosen resolution
-RESOLUTION = 1.5                                
+RESOLUTION = 2.5                                
 
 # shape of the MNI152 (1mm^3) template
 INPUT_SHAPE_1mm = (182, 218, 182)   
@@ -87,8 +87,12 @@ INPUT_SHAPE_1mm = (182, 218, 182)
 # resampling the MNI152 to (1.5mm^3)
 INPUT_SHAPE_1p5mm = (122, 146, 122)   
 
+# resampling the MNI152 to (2.5mm^3)
+INPUT_SHAPE_2p5mm = (72, 87, 72)   
+
 # Adjusting the dimensions to be divisible by 8 (2^3 where 3 are the downsampling layers of the AE)
-INPUT_SHAPE_AE = (120, 144, 120)   
+# INPUT_SHAPE_AE = (120, 144, 120)   
+INPUT_SHAPE_AE = (72, 80, 72)
 
 # Latent shape of the autoencoder 
 LATENT_SHAPE_AE = (3, 15, 18, 15)   
