@@ -11,6 +11,8 @@ from torch.utils.tensorboard.writer import SummaryWriter
 import os
 import torch.nn.functional as F
 
+import re
+
 class AverageLoss:
     """
     Utility class to track losses
@@ -341,3 +343,13 @@ def calculate_metrics(images, reconstructions, mask=None):
         batch_ssim.append(ssim.item())
     
     return sum(batch_psnr) / len(batch_psnr), sum(batch_ssim) / len(batch_ssim)
+
+def get_next_experiment_path(output_dir, experiment_name):
+    # Pattern: experiment_name_0, experiment_name_1, etc.
+    pattern = re.compile(rf"^{re.escape(experiment_name)}_(\d+)$")
+    existing = [d for d in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, d))]
+    indices = [int(match.group(1)) for d in existing if (match := pattern.match(d))]
+    next_idx = max(indices) + 1 if indices else 0
+    exp_path = os.path.join(output_dir, f"{experiment_name}_{next_idx}")
+    os.makedirs(exp_path, exist_ok=True)
+    return exp_path, next_idx
