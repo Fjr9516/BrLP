@@ -12,6 +12,7 @@ import os
 import torch.nn.functional as F
 
 import re
+from monai.metrics import SSIMMetric, PSNRMetric
 
 class AverageLoss:
     """
@@ -343,6 +344,44 @@ def calculate_metrics(images, reconstructions, mask=None):
         batch_ssim.append(ssim.item())
     
     return sum(batch_psnr) / len(batch_psnr), sum(batch_ssim) / len(batch_ssim)
+
+def calculate_metrics_monai(images, reconstructions, max_val=1.0):
+    """
+    Calculate PSNR and SSIM metrics between original and reconstructed images using MONAI implementations.
+
+    Args:
+        images (torch.Tensor): Original images, shape (B, C, D, H, W)
+        reconstructions (torch.Tensor): Reconstructed images, shape (B, C, D, H, W)
+        max_val (float): The dynamic range of the image data.
+            - Use 1.0 for images normalized to [0, 1]
+            - Use 255 for images in [0, 255] (e.g., uint8)
+    
+    Returns:
+        tuple: (avg_psnr, avg_ssim)
+            - avg_psnr (float): Average PSNR over the batch.
+            - avg_ssim (float): Average SSIM over the batch.
+    """
+    # Ensure correct shape: (B, C, D, H, W)
+    if images.ndim == 4:
+        images = images.unsqueeze(1)
+        reconstructions = reconstructions.unsqueeze(1)
+
+    # Ensure float dtype and tensors are on the correct device
+    device = images.device
+    images = images.float().to(device)
+    reconstructions = reconstructions.float().to(device)
+
+    # Instantiate metrics
+    ssim_metric = SSIMMetric(spatial_dims=3, data_range=max_val)
+    psnr_metric = PSNRMetric(max_val=max_val)
+
+    with torch.no_grad():
+        ssim = ssim_metric(reconstructions, images)
+        psnr = psnr_metric(reconstructions, images)
+        avg_ssim = ssim.mean().item()
+        avg_psnr = psnr.mean().item()
+
+    return avg_psnr, avg_ssim
 
 def get_next_experiment_path(output_dir, experiment_name):
     # Pattern: experiment_name_0, experiment_name_1, etc.
